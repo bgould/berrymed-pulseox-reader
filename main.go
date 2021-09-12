@@ -13,15 +13,6 @@ var adapter = bluetooth.DefaultAdapter
 
 var address string
 
-func try(err error, msg string) {
-	if err != nil {
-		for {
-			log.Println(msg, ": ", err.Error())
-			time.Sleep(2 * time.Second)
-		}
-	}
-}
-
 func main() {
 
 	wait()
@@ -38,45 +29,80 @@ func main() {
 	}
 
 	for {
-
-		ctx, cancel := context.WithCancel(context.Background())
-		go func() {
-			time.Sleep(2 * time.Second)
-			cancel()
-		}()
-		log.Println("scanning...")
-		devs, errs := Scan(ctx, adapter, func(res bluetooth.ScanResult) bool {
-			if res.Address == nil {
-				return false
-			}
-			return res.Address.String() == address
-		})
-
 		var foundDevice *bluetooth.ScanResult
-		select {
-		case dev := <-devs:
-			foundDevice = &dev
-			cancel()
-		case err := <-errs:
-			log.Printf("error scanning: %v", err)
-		}
+
+		func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			go func() {
+				time.Sleep(2 * time.Second)
+				cancel()
+			}()
+			log.Println("scanning...")
+
+			if results := Scan(ctx, adapter, matchAddress(address)); results.Next() {
+				result := results.Curr()
+				foundDevice = &result
+			} else if err := results.Err(); err != nil {
+				log.Printf("scanning error: %v", err)
+			}
+		}()
 
 		if foundDevice == nil || foundDevice.Address == nil {
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		port, err := OpenPort(adapter, foundDevice.Address, 0)
-		if err != nil {
-			log.Printf("failed to open port %s: %v", foundDevice.Address, err)
-			time.Sleep(1 * time.Second)
-			continue
-		}
+		func() {
 
-		for packet := range parse(port.rbuf, 3*time.Second) {
-			os.Stdout.Write([]byte(packet.String() + "\n"))
-		}
+			defer time.Sleep(time.Second)
+
+			addrstr := foundDevice.Address.String()
+			addr, _ := bluetooth.ParseMAC(addrstr)
+
+			device, err := adapter.Connect(foundDevice.Address, bluetooth.ConnectionParams{})
+			if err != nil {
+				log.Printf("could not connect: %v", err)
+				return
+			}
+			defer device.Disconnect()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			port, err := OpenUART(ctx, device, 1024)
+			if err != nil {
+				log.Printf("failed to open UART %s: %v", foundDevice.Address, err)
+				return
+			}
+
+			for packets := parsePackets(ctx, addr, port); ; {
+				select {
+				case packet := <-packets:
+					//pkt, _ := packet.MarshalJSON()
+					pkt := packet.String()
+					os.Stdout.Write([]byte(string(pkt) + "\n"))
+					continue
+				case <-time.After(2 * time.Second):
+					cancel()
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
+
+		}()
 
 	}
 
+}
+
+func matchAddress(addr string) func(bluetooth.ScanResult) bool {
+	return func(res bluetooth.ScanResult) bool {
+		if res.Address == nil {
+			return false
+		}
+		return res.Address.String() == addr
+	}
 }
