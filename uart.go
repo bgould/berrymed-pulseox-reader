@@ -10,7 +10,7 @@ import (
 )
 
 type UART interface {
-	io.Reader
+	io.ByteReader
 
 	Buffered() int
 }
@@ -42,9 +42,9 @@ type mchpTransparentUART struct {
 	rb *ringbuffer.RingBuffer
 }
 
-func (port *mchpTransparentUART) Read(buf []byte) (int, error) {
-	return port.rb.Read(buf)
-}
+//func (port *mchpTransparentUART) Read(buf []byte) (int, error) {
+//	return port.rb.Read(buf)
+//}
 
 func (port *mchpTransparentUART) ReadByte() (byte, error) {
 	return port.rb.ReadByte()

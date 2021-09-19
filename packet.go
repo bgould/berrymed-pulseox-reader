@@ -1,13 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"time"
 
 	"tinygo.org/x/bluetooth"
 )
+
+// https://github.com/zh2x/BCI_Protocol
 
 type packet struct {
 	ts  int64
@@ -39,10 +40,9 @@ func (p packet) MarshalJSON() ([]byte, error) {
 
 func parsePackets(ctx context.Context, mac bluetooth.MAC, uart UART) <-chan packet {
 	var (
-		buf [5]byte
 		st  = 0
 		ch  = make(chan packet, 64)
-		br  = bufio.NewReader(uart)
+		pkt = packet{mac: mac}
 	)
 	go func() {
 		defer close(ch)
@@ -51,18 +51,18 @@ func parsePackets(ctx context.Context, mac bluetooth.MAC, uart UART) <-chan pack
 			case <-ctx.Done():
 				return
 			default:
-				if uart.Buffered() == 0 && br.Buffered() == 0 {
+				if uart.Buffered() == 0 {
 					time.Sleep(time.Millisecond)
 					continue
 				}
-				b, err := br.ReadByte()
+				b, err := uart.ReadByte()
 				if err != nil {
 					return
 				}
 				switch st {
 				case 0:
 					if (1<<7)&b > 0 {
-						buf[st] = b
+						pkt.buf[st] = b
 						st++
 					}
 				default:
@@ -70,9 +70,10 @@ func parsePackets(ctx context.Context, mac bluetooth.MAC, uart UART) <-chan pack
 						st = 0
 						continue
 					}
-					buf[st] = b
+					pkt.buf[st] = b
+					pkt.ts = time.Now().UnixNano()
 					if st == 4 {
-						ch <- packet{ts: time.Now().UnixNano(), mac: mac, buf: buf}
+						ch <- pkt
 						st = 0
 					} else {
 						st++
