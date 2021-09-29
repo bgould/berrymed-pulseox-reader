@@ -55,7 +55,8 @@ func (port *mchpTransparentUART) Buffered() int {
 }
 
 func (port *mchpTransparentUART) writeToBuffer(value []byte) {
-	for bytesWritten := 0; bytesWritten < len(value); {
+	length := len(value)
+	for bytesWritten := 0; bytesWritten < length; {
 		n, err := port.rb.Write(value)
 		if err != nil {
 			return
